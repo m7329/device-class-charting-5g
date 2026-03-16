@@ -1,5 +1,10 @@
 import tensorflow as tf
 
+# TODO:
+# - Test functionality of existing code
+# - Test PCA function
+# - Find out what Feature matrices to use for Frobenius norm calculation
+
 # The Features tensor has dimension [n_data_samples, n_tx_ant * n_prbs * 12, n_dmrs_symbols, 2]
 @tf.function
 dim_red_pca(Features, D_prime=2):
@@ -45,13 +50,18 @@ dim_red_pca(Features, D_prime=2):
 dim_red_sammon(Features):
     complex_Features = tf.complex(Features[:, :, :, 0], Features[:, :, :, 1])
 
-    n_samples = tf.shape(Features)[0]
+    n_dmrs_symbols = tf.shape(Features)[2]
 
-    D_pairwise_distances = tf.TensorArray(tf.float32, size=n_samples)
+    n_samples = tf.shape(Features)[0]
 
     Z_sammon_array = tf.TensorArray(tf.complex64, size=n_samples)
 
     # Iterate over all data samples
     for i in tf.range(n_samples):
         C_i = complex_Features[i]
-        D_pairwise_distances = tf.norm(C_i[:,1:] - C_i[:,:-1], ord='fro',axis=1, keepdims=False)
+
+        C_col = tf.expand_dims(C_i, axis=1) # [n_tx_ant * n_prbs * 12, 1, n_dmrs_symbols]
+        C_row = tf.expand_dims(C_i, axis=2) # [n_tx_ant * n_prbs * 12, n_dmrs_symbols, 1]
+
+        # D has dimension [n_tx_ant * n_prbs * 12, n_dmrs_symbols, n_dmrs_symbols]
+        D_pairwise_distances = tf.norm(C_col - C_row, ord='fro', axis=0)
