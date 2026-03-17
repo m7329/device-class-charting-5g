@@ -28,6 +28,8 @@ Also, training is non-deterministic. Multiple training trials can achieve slight
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import argparse
+import os
 
 from sklearn.metrics import confusion_matrix, accuracy_score
 
@@ -47,6 +49,8 @@ tf.random.set_seed(1)
 np.random.seed(1)
 
 # GPU configuration
+# TODO: Find out how to use multiple GPUs
+os.environ["CUDA_VISIBLE_DEVICES"] = "6,7"
 GPU_NUM = 0  # Select which GPU to use
 gpus = tf.config.list_physical_devices('GPU')
 print('Number of GPUs available :', len(gpus))
@@ -106,7 +110,7 @@ def train(training_csi, training_labels, test_csi, test_labels, epochs=400):
     return model
 
 
-def test(clf_path_in, result_path, test_csi, test_labels, label_list):
+def test(clf_path_in, result_path, test_csi, test_labels, label_list, show_plots=True):
     """
     Test the trained classification network and generate evaluation metrics.
 
@@ -124,7 +128,7 @@ def test(clf_path_in, result_path, test_csi, test_labels, label_list):
     label_test = test_labels
 
     # Load neural network
-    net_test = load_model(clf_path_in, compile=False)
+    net_test = load_model(clf_path_in, compile=False, safe_mode=False)
 
     # Convert to channel independent spectrogram
     data = test_csi
@@ -149,7 +153,10 @@ def test(clf_path_in, result_path, test_csi, test_labels, label_list):
     plt.ylabel('True label', fontsize=12)
     # result_path = "./results/confusion_matrix_no_random_subsampling10"
     plt.savefig(result_path+'.pdf', bbox_inches='tight')
-    plt.show()
+    if show_plots:
+        plt.show()
+    else:
+        plt.close()
 
     rows, cols = conf_mat.shape
     with open(result_path + ".dat", "w") as f:
@@ -163,20 +170,56 @@ def test(clf_path_in, result_path, test_csi, test_labels, label_list):
 
 
 if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="Closed-set device classification (5G CSI RFFI)")
+    parser.add_argument("--experiment-name", default="5_ues_complex_features_val_middle_4oru_2026_03_17", type=str)
+    parser.add_argument("--feature-type", default="obfuscation", choices=["obfuscation", "ofdm_absolutes"]) # Feature extraction type: 'obfuscation' or 'ofdm_absolutes'
+    parser.add_argument("--file-path", default="/scratch/bsc26f18/datasets/device_classification_2025_11_15", type=str)
+    parser.add_argument("--n-orus", default=4, type=int) # number of O-RUs (access points)
+    parser.add_argument("--random-subsampling", action="store_true")
+    parser.add_argument("--take-middle", action="store_true") # Take middle samples for validation set
+    parser.add_argument("--test-to-all-ratio", default=0.125, type=float) # Fraction of samples used for same-day testing (12.5%)
+    parser.add_argument("--epochs", default=400, type=int) # number of epochs to train for
+
+    # Data subsetting for smoke tests / quick iterations
+    parser.add_argument("--subset-fraction", default=None, type=float)
+    parser.add_argument("--max-samples-per-label", default=None, type=int)
+    parser.add_argument("--subset-seed", default=1, type=int)
+
+    # UX
+    parser.add_argument("--no-show", action="store_true", help="Do not open matplotlib windows")
+    parser.add_argument("--smoke", action="store_true", help="Tiny subset + very few epochs (fast pipeline check)")
+    args = parser.parse_args()
+
+    if args.smoke:
+        # Keep it tiny and fast; goal is end-to-end correctness, not accuracy.
+        if args.subset_fraction is None:
+            args.subset_fraction = 0.02
+        if args.max_samples_per_label is None:
+            args.max_samples_per_label = 20
+        args.epochs = min(args.epochs, 1)
+        args.random_subsampling = True
+        args.take_middle = False
+        args.test_to_all_ratio = 0.2
+        args.no_show = True
+        args.experiment_name = args.experiment_name + "_SMOKE"
+
     # Configuration parameters
-    experiment_name = '5_ues_complex_features_val_middle_4oru_2025_11_15_1_test'
-    feature_type = 'obfuscation'  # Feature extraction type: 'obfuscation' or 'ofdm_absolutes'
-    random_subsampling = False
-    take_middle = True  # Take middle samples for validation set
-    test_to_all_ratio = 0.125  # Fraction of samples used for same-day testing (12.5%)
-    file_path = '/scratch/rwiesmayr/csi_data/device_classification_2025_11_15'
+    experiment_name = args.experiment_name
+    feature_type = args.feature_type
+    random_subsampling = args.random_subsampling
+    take_middle = args.take_middle
+    test_to_all_ratio = args.test_to_all_ratio
+    file_path = args.file_path
+    n_orus = args.n_orus
+
     # uncomment this to train on all 6 UEs
     # label_list_training = ["iPhone14Pro_gold", "iPhone14Pro_black", "iPhone16e", "OnePlusNord", "sgs23", "pixel7"]
     # train only on 5 UEs
     label_list_training = ["iPhone14Pro_gold", "iPhone16e", "OnePlusNord", "sgs23", "pixel7"]
-    clf_path = f'/scratch/rwiesmayr/results/weights/cnn_subsampling_{random_subsampling}_features_{feature_type}_{experiment_name}.weight'
-    results_path = f'/scratch/rwiesmayr/results/device_classification/confusion_matrix_{random_subsampling}_features_{feature_type}_{experiment_name}'
-    n_orus = 4  # Number of O-RUs (access points)
+    
+    # Keras 3 requires a recognized extension for model.save()
+    clf_path = f'/scratch/bsc26f18/results/weights/cnn_subsampling_{random_subsampling}_features_{feature_type}_{experiment_name}.keras'
+    results_path = f'/scratch/bsc26f18/results/device_classification/confusion_matrix_{random_subsampling}_features_{feature_type}_{experiment_name}'
 
     # Load dataset and extract features
     LoadDatasetObj = Load5gDataset(feature_type=feature_type)
@@ -186,10 +229,13 @@ if __name__ == '__main__':
                                                random_subsampling=random_subsampling,
                                                n_orus=n_orus,
                                                test_to_all_ratio=test_to_all_ratio,
-                                               take_middle=take_middle)
+                                               take_middle=take_middle,
+                                               subset_fraction=args.subset_fraction,
+                                               max_samples_per_label=args.max_samples_per_label,
+                                               subset_seed=args.subset_seed)
     
     # Train classification network
-    clf_net = train(training_csi, training_labels, test_csi, test_labels)
+    clf_net = train(training_csi, training_labels, test_csi, test_labels, epochs=args.epochs)
     clf_net.save(clf_path)
 
     # if random_subsampling==False:
@@ -203,7 +249,7 @@ if __name__ == '__main__':
     
     # Evaluate on same-day test set
     label_list_testing_plot = label_list_training
-    acc = test(clf_path, results_path, test_csi, test_labels, label_list_testing_plot)
+    acc = test(clf_path, results_path, test_csi, test_labels, label_list_testing_plot, show_plots=not args.no_show)
     print('Overall accuracy (same day, 5) = %.4f' % acc)
 
     # Load next-day test set and evaluate
@@ -213,9 +259,12 @@ if __name__ == '__main__':
                                                random_subsampling=random_subsampling,
                                                n_orus=n_orus,
                                                test_to_all_ratio=1.0,
-                                               take_middle=take_middle)
+                                               take_middle=take_middle,
+                                               subset_fraction=args.subset_fraction,
+                                               max_samples_per_label=args.max_samples_per_label,
+                                               subset_seed=args.subset_seed)
     
-    acc = test(clf_path, results_path+"_next_day", test_csi, test_labels, label_list_testing_plot)
+    acc = test(clf_path, results_path+"_next_day", test_csi, test_labels, label_list_testing_plot, show_plots=not args.no_show)
     print('Overall accuracy (next day, 5) = %.4f' % acc)
 
     # label_list_training = ["iPhone14Pro_gold", "iPhone16e", "OnePlusNord", "sgs23", "pixel7"] # "iPhone14Pro_black"
@@ -226,9 +275,12 @@ if __name__ == '__main__':
                                                random_subsampling=random_subsampling,
                                                n_orus=n_orus,
                                                test_to_all_ratio=1.0,
-                                               take_middle=take_middle)
+                                               take_middle=take_middle,
+                                               subset_fraction=args.subset_fraction,
+                                               max_samples_per_label=args.max_samples_per_label,
+                                               subset_seed=args.subset_seed)
     
-    acc = test(clf_path, results_path+"_next_day_6", test_csi, test_labels, label_list_testing6)
+    acc = test(clf_path, results_path+"_next_day_6", test_csi, test_labels, label_list_testing6, show_plots=not args.no_show)
     print('Overall accuracy (next day, 6) = %.4f' % acc)
 
     # label_list_training = ["iPhone14Pro_gold", "iPhone16e", "OnePlusNord", "sgs23", "pixel7"] # "iPhone14Pro_black"

@@ -1,9 +1,10 @@
 from keras.layers import Input, Lambda, ReLU, Add
 from keras.models import Model
-from keras import backend as K
 from keras.layers import (Dense, Conv2D, Flatten, BatchNormalization, AveragePooling2D)
+from keras.saving import register_keras_serializable
 
 import numpy as np
+import tensorflow as tf
 
 # In[]
 '''Residual block'''
@@ -34,6 +35,12 @@ def resblock(x, kernelsize, filters, first_layer=False):
     return out
 
 
+# Register Lambda layer for (de-)serialization
+@register_keras_serializable(package="rffi")
+def l2_normalize_axis1(x):
+    return tf.nn.l2_normalize(x, axis=1)
+
+
 def classification_net(datashape, num_classes):
     datashape = datashape
 
@@ -53,7 +60,8 @@ def classification_net(datashape, num_classes):
 
     x = Dense(512)(x)
 
-    x = Lambda(lambda x: K.l2_normalize(x, axis=1), name='feature_layer')(x)
+    # Keras 3 requires explicit output_shape for Lambda layers
+    x = Lambda(l2_normalize_axis1, output_shape=lambda s: s, name='feature_layer')(x)
 
     outputs = Dense(num_classes, activation='softmax')(x)
 

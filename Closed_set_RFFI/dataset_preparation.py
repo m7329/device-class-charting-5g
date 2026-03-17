@@ -29,7 +29,22 @@ class Load5gDataset():
         assert feature_type in ['ofdm_absolutes', 'obfuscation']
         self.feature_type = feature_type
 
-    def load_channel_estimates(self, file_path, label_list=[], test_to_all_ratio=0.2, n_prbs=273, n_orus=1, n_rx_ant_per_oru = 4, n_tx_ant=1, n_dmrs_symbols = 3, random_subsampling=True, take_middle=False):
+    def load_channel_estimates(
+        self,
+        file_path,
+        label_list=[],
+        test_to_all_ratio=0.2,
+        n_prbs=273,
+        n_orus=1,
+        n_rx_ant_per_oru=4,
+        n_tx_ant=1,
+        n_dmrs_symbols=3,
+        random_subsampling=True,
+        take_middle=False,
+        subset_fraction=None,
+        max_samples_per_label=None,
+        subset_seed=1,
+    ):
         test_csi_list = []
         test_label_list = []
         training_csi_list = []
@@ -38,6 +53,26 @@ class Load5gDataset():
             print("Load data for " + label)
             data_path = os.path.join(file_path, label)
             data_files = [f for f in os.listdir(data_path) if os.path.isfile(os.path.join(data_path, f)) and ".pickle" in f]
+
+            if subset_fraction is not None or max_samples_per_label is not None:
+                if subset_fraction is None:
+                    subset_fraction_ = 1.0
+                else:
+                    subset_fraction_ = float(subset_fraction)
+                    if subset_fraction_ <= 0.0 or subset_fraction_ > 1.0:
+                        raise ValueError(f"subset_fraction must be in (0, 1], got {subset_fraction}")
+
+                n_total = len(data_files)
+                n_subset = max(1, int(np.floor(n_total * subset_fraction_)))
+                if max_samples_per_label is not None:
+                    n_subset = min(n_subset, int(max_samples_per_label))
+                n_subset = min(n_subset, n_total)
+
+                rng = np.random.default_rng(int(subset_seed))
+                subset_idx = rng.choice(n_total, size=n_subset, replace=False)
+                data_files = list(np.array(data_files, dtype=object)[subset_idx])
+                print(f"Subsampled {n_subset}/{n_total} pickle files for {label}")
+
             n_data_samples = len(data_files)
             H = np.zeros((n_data_samples, n_orus, n_rx_ant_per_oru, n_tx_ant, n_prbs*12, n_dmrs_symbols), dtype=np.complex64)
             noise_var = np.zeros((n_data_samples,n_orus), dtype=np.float32)
@@ -66,6 +101,9 @@ class Load5gDataset():
                         timestamp_str = data_file.split("_")[0]
                         timestamp = np.fromstring(timestamp_str, dtype=np.float64, sep='.')
                         sample_timestamps[idx] = timestamp[0]
+            # Ensure tqdm finishes its line before subsequent prints.
+            t.close()
+            print("")
             
             # compute features
             if self.feature_type == 'ofdm_absolutes':
@@ -98,9 +136,14 @@ class Load5gDataset():
 
                 print("Compute SVD")
                 #U, S, Vh = np.linalg.svd(H_, full_matrices=False, compute_uv=True, hermitian=False)
-                U, S, Vh = cp.linalg.svd(cp.array(H_), full_matrices=False, compute_uv=True)
-
-                principal_singular_vector = np.take(U.get(), indices=0, axis=-1)
+                #U, S, Vh = cp.linalg.svd(cp.array(H_), full_matrices=False, compute_uv=True)
+                
+                # Workaround for cuSOLVER/CuPy: computing singular vectors (compute_uv=True)
+                # can fail for complex64 in some environments. Using complex128 is robust.
+                Hb = cp.array(H_).astype(cp.complex128)
+                U, S, Vh = cp.linalg.svd(Hb, full_matrices=False, compute_uv=True)
+                # principal_singular_vector = np.take(U.get(), indices=0, axis=-1)
+                principal_singular_vector = cp.asnumpy(U[:, :, 0]).astype(np.complex64)
 
                 print("Stack real and imaginary part in last dimension")
                 features = np.expand_dims(principal_singular_vector, axis=-1)
