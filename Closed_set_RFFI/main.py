@@ -44,6 +44,8 @@ from keras.utils import to_categorical
 
 import tensorflow as tf
 
+from dim_reduction import dim_red_pca
+
 # Set random seeds for reproducibility
 tf.random.set_seed(1)
 np.random.seed(1)
@@ -188,6 +190,7 @@ if __name__ == '__main__':
     # UX
     parser.add_argument("--no-show", action="store_true", help="Do not open matplotlib windows")
     parser.add_argument("--smoke", action="store_true", help="Tiny subset + very few epochs (fast pipeline check)")
+    parser.add_argument("--apply-pca", action="store_true", help="Apply per-sample PCA before training/testing (obfuscation features only)")
     args = parser.parse_args()
 
     if args.smoke:
@@ -233,6 +236,20 @@ if __name__ == '__main__':
                                                subset_fraction=args.subset_fraction,
                                                max_samples_per_label=args.max_samples_per_label,
                                                subset_seed=args.subset_seed)
+
+    if args.apply_pca:
+        if feature_type != "obfuscation":
+            raise ValueError("--apply-pca requires --feature-type obfuscation (expected [..., n_dmrs_symbols, 2]).")
+
+    def apply_pca(x: np.ndarray) -> np.ndarray:
+        x_tf = tf.convert_to_tensor(x, dtype=tf.float32)
+        return dim_red_pca(x_tf).numpy().astype(np.float32)
+
+    print("Applying PCA (D'=2) to training/test splits...")
+    print("Before PCA:", "training_csi", training_csi.shape, "test_csi", test_csi.shape)
+    training_csi = apply_pca(training_csi)
+    test_csi = apply_pca(test_csi)
+    print("After PCA: ", "training_csi", training_csi.shape, "test_csi", test_csi.shape)
     
     # Train classification network
     clf_net = train(training_csi, training_labels, test_csi, test_labels, epochs=args.epochs)
@@ -263,6 +280,9 @@ if __name__ == '__main__':
                                                subset_fraction=args.subset_fraction,
                                                max_samples_per_label=args.max_samples_per_label,
                                                subset_seed=args.subset_seed)
+
+    if args.apply_pca:
+        test_csi = apply_pca(test_csi)
     
     acc = test(clf_path, results_path+"_next_day", test_csi, test_labels, label_list_testing_plot, show_plots=not args.no_show)
     print('Overall accuracy (next day, 5) = %.4f' % acc)
@@ -279,6 +299,9 @@ if __name__ == '__main__':
                                                subset_fraction=args.subset_fraction,
                                                max_samples_per_label=args.max_samples_per_label,
                                                subset_seed=args.subset_seed)
+
+    if args.apply_pca:
+        test_csi = apply_pca(test_csi)
     
     acc = test(clf_path, results_path+"_next_day_6", test_csi, test_labels, label_list_testing6, show_plots=not args.no_show)
     print('Overall accuracy (next day, 6) = %.4f' % acc)

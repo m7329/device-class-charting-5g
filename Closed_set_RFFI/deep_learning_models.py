@@ -54,7 +54,10 @@ def classification_net(datashape, num_classes):
     x = resblock(x, 3, 64, first_layer=True)
     x = resblock(x, 3, 64)
 
-    x = AveragePooling2D(pool_size=2)(x)
+    # PCA can reduce the input spatial dims (e.g., H=2, W=3), which after the stride-2
+    # conv/resblocks can lead to H=1. Using padding="same" avoids negative-dimension
+    # errors for small feature maps while keeping the pooling behavior similar.
+    x = AveragePooling2D(pool_size=2, padding="same")(x)
 
     x = Flatten()(x)
 
