@@ -241,15 +241,15 @@ if __name__ == '__main__':
         if feature_type != "obfuscation":
             raise ValueError("--apply-pca requires --feature-type obfuscation (expected [..., n_dmrs_symbols, 2]).")
 
-    def apply_pca(x: np.ndarray) -> np.ndarray:
-        x_tf = tf.convert_to_tensor(x, dtype=tf.float32)
-        return dim_red_pca(x_tf).numpy().astype(np.float32)
+        def apply_pca(x: np.ndarray) -> np.ndarray:
+            x_tf = tf.convert_to_tensor(x, dtype=tf.float32)
+            return dim_red_pca(x_tf).numpy().astype(np.float32)
 
-    print("Applying PCA (D'=2) to training/test splits...")
-    print("Before PCA:", "training_csi", training_csi.shape, "test_csi", test_csi.shape)
-    training_csi = apply_pca(training_csi)
-    test_csi = apply_pca(test_csi)
-    print("After PCA: ", "training_csi", training_csi.shape, "test_csi", test_csi.shape)
+        print("Applying PCA (D'=2) to training/test splits...")
+        print("Before PCA:", "training_csi", training_csi.shape, "test_csi", test_csi.shape)
+        training_csi = apply_pca(training_csi)
+        test_csi = apply_pca(test_csi)
+        print("After PCA: ", "training_csi", training_csi.shape, "test_csi", test_csi.shape)
     
     # Train classification network
     clf_net = train(training_csi, training_labels, test_csi, test_labels, epochs=args.epochs)

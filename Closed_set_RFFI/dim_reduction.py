@@ -10,12 +10,49 @@ import tensorflow as tf
 def dim_red_pca(Features):
     complex_Features = tf.complex(Features[:, :, :, 0], Features[:, :, :, 1])
 
+    # n_features =n_tx_ant * n_prbs * 12
     n_samples = tf.shape(Features)[0]
 
     # Return PCA scores per DMRS symbol:
     # [n_samples, n_dmrs_symbols, D_prime=2, 2]
     Z_pca_array = tf.TensorArray(tf.float32, size=n_samples)
 
+    # Uncomment this to have averaged DMRS symbols (Studer in his paper with raw 2nd moment)
+    edited_features = tf.reduce_mean(complex_Features, axis=2) # [n_samples, n_features]
+
+    # Flatten the features to [n_samples, n_features*n_dmrs_symbols] to apply PCA over each sample
+    # edited_features = tf.reshape(complex_Features, [n_samples, -1])
+
+    F = tf.transpose(edited_features) # [x, n_samples]
+    row_mean = tf.reduce_mean(F, axis=1, keepdims=True)
+    F_bar = F - row_mean
+    F_bar_H = tf.linalg.adjoint(F_bar)
+    gram_matrix = tf.matmul(F_bar_H, F_bar) # Shape: [n_samples, n_samples]
+    eigenvalues, U = tf.linalg.eigh(gram_matrix)
+
+    # Reverse to get descending order (largest eigenvalues first)
+    eigenvalues = tf.reverse(eigenvalues, axis=[0])
+    U = tf.reverse(U, axis=[1])
+
+    Sigma_d = eigenvalues[:2]
+    U_d = U[:, :2] # Shape: [n_samples, D_prime=2]
+
+    Sigma_d_complex = tf.cast(tf.sqrt(Sigma_d), tf.complex64)
+    Z_pca = tf.linalg.adjoint(Sigma_d_complex * U_d) # [D_prime=2, n_samples]
+    
+    Z_pca = tf.transpose(Z_pca) # [n_samples, D_prime=2]
+    
+    Z_pca_real = tf.math.real(Z_pca)
+    Z_pca_imag = tf.math.imag(Z_pca)
+    Z_pca_out = tf.stack([Z_pca_real, Z_pca_imag], axis=-1)
+
+    Z_pca_out = tf.cast(Z_pca_out, tf.float32) # [n_samples, D_prime=2, 2]
+
+    # The downstream model expects 4D input
+    Z_pca_out = tf.expand_dims(Z_pca_out, axis=2) # [n_samples, D_prime=2, 1, 2]
+
+
+    '''
     # Need to iterate over first dimension of complex_Features and apply the PCA to each data sample
     for i in tf.range(n_samples):
 
@@ -54,6 +91,10 @@ def dim_red_pca(Features):
         Z_pca_array = Z_pca_array.write(i, Z_pca_i)
 
     return Z_pca_array.stack()
+
+    '''
+
+    return Z_pca_out # [n_samples, D_prime=2, 1, 2]
 
 
 # The Features tensor has dimension [n_data_samples, n_tx_ant * n_prbs * 12, n_dmrs_symbols, 2]
