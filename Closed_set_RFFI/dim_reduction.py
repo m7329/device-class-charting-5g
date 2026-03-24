@@ -18,10 +18,10 @@ def dim_red_pca(Features):
     Z_pca_array = tf.TensorArray(tf.float32, size=n_samples)
 
     # Uncomment this to have averaged DMRS symbols (Studer in his paper with raw 2nd moment)
-    edited_features = tf.reduce_mean(complex_Features, axis=2) # [n_samples, n_features]
+    # edited_features = tf.reduce_mean(complex_Features, axis=2) # [n_samples, n_features]
 
     # Flatten the features to [n_samples, n_features*n_dmrs_symbols] to apply PCA over each sample
-    # edited_features = tf.reshape(complex_Features, [n_samples, -1])
+    edited_features = tf.reshape(complex_Features, [n_samples, -1])
 
     F = tf.transpose(edited_features) # [x, n_samples]
     row_mean = tf.reduce_mean(F, axis=1, keepdims=True)
